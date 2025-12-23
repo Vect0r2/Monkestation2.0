@@ -123,6 +123,14 @@
 	/// If TRUE, the AI will send it's [var/bot_ref][commanded bot] to the next clicked atom
 	VAR_FINAL/setting_waypoint = FALSE
 
+	/* YOGSTATION AI NETWORK SYSTEM */
+	/// The AI network this AI is connected to
+	var/datum/ai_network/ai_network
+	/// Dashboard for managing AI projects and resources (Phase 5 - not yet implemented)
+	//var/datum/ai_dashboard/dashboard
+	/// Whether this AI is currently in a dying/shutdown state
+	var/is_dying = FALSE
+
 /mob/living/silicon/ai/Initialize(mapload, datum/ai_laws/L, mob/target_ai)
 	. = ..()
 	if(!target_ai) //If there is no player/brain inside.
@@ -243,6 +251,10 @@
 	GLOB.ai_list -= src
 	GLOB.shuttle_caller_list -= src
 	SSshuttle.autoEvac()
+	// YOGSTATION: Disconnect from AI network
+	if(ai_network)
+		ai_network.ai_list -= src
+		ai_network = null
 	QDEL_NULL(eyeobj) // No AI, no Eye
 	QDEL_NULL(spark_system)
 	QDEL_NULL(malf_picker)
@@ -1232,10 +1244,74 @@
 
 /mob/living/silicon/ai/verb/jobtitles()
 	set category = "AI Commands"
-	set name = "Toggle Jobtitle Display"
+	set name = "Toggle Job Titles"
+	set desc = "Toggle if you see job titles with the names on the examine text."
 
-	if(incapacitated())
+	if(jobtitles)
+		jobtitles = FALSE
+		to_chat(src, span_notice("You will no longer see job titles with the names"))
+	else
+		jobtitles = TRUE
+		to_chat(src, span_notice("You will now see job titles with the names"))
+
+// YOGSTATION AI NETWORK INTEGRATION
+// These procs connect the AI to the decentralized network system
+
+/// Check current network status and resources
+/mob/living/silicon/ai/verb/check_network_status()
+	set category = "AI Commands"
+	set name = "Check Network Status"
+	set desc = "View your current AI network connection and resources."
+
+	if(!ai_network)
+		to_chat(src, span_warning("You are not connected to any AI network!"))
+		to_chat(src, span_info("You need to be housed in an AI data core connected to ethernet cables."))
 		return
-	jobtitles = !jobtitles
-	to_chat(src, "<b>You are now [jobtitles ? "displaying" : "hiding"] speaker's job titles.</b>")
-#undef CALL_BOT_COOLDOWN
+
+	to_chat(src, span_notice("<b>=== AI Network Status ===</b>"))
+	to_chat(src, span_info("Network ID: [REF(ai_network)]"))
+	to_chat(src, span_info("Total CPU: [ai_network.resources.total_cpu()] THz"))
+	to_chat(src, span_info("Total RAM: [ai_network.resources.total_ram()] TB"))
+	to_chat(src, span_info("AIs on network: [ai_network.ai_list.len]"))
+	to_chat(src, span_info("Machines connected: [ai_network.nodes.len]"))
+	to_chat(src, span_info("Cable segments: [ai_network.cables.len]"))
+
+	var/obj/machinery/ai/data_core/my_core = loc
+	if(istype(my_core))
+		to_chat(src, span_info("Current core: [my_core.name] at [get_area(my_core)]"))
+		to_chat(src, span_info("Core temperature: [my_core.core_temp]K"))
+		to_chat(src, span_info("Core power: [my_core.has_power() ? "Online" : "Offline"]"))
+
+/// Relocate the AI to the best available data core (used when current core is failing)
+/mob/living/silicon/ai/proc/relocate()
+	if(!ai_network)
+		to_chat(src, span_warning("You have no network connection to relocate through!"))
+		return
+
+	var/obj/machinery/ai/data_core/best_core = ai_network.find_best_core(src)
+	if(!best_core)
+		to_chat(src, span_warning("No suitable data cores found for relocation!"))
+		return
+
+	if(best_core.can_transfer_ai())
+		to_chat(src, span_notice("Transferring consciousness to data core at [get_area(best_core)]..."))
+		best_core.transfer_AI(src)
+	else
+		to_chat(src, span_warning("Target core is not available for transfer!"))
+
+/// Called when the AI switches between networks
+/mob/living/silicon/ai/proc/switch_ainet(datum/ai_network/old_network, datum/ai_network/new_network)
+	if(old_network == new_network)
+		return
+
+	if(old_network)
+		to_chat(src, span_warning("Network connection changed - old network disconnected."))
+
+	if(new_network)
+		to_chat(src, span_notice("Connected to AI network. CPU: [new_network.resources.total_cpu()]THz, RAM: [new_network.resources.total_ram()]TB"))
+		// PLACEHOLDER: Dashboard creation will be added in Phase 5
+		//if(!dashboard)
+		//	dashboard = new /datum/ai_dashboard(src, new_network)
+	else
+		to_chat(src, span_warning("You have no network connection!"))
+

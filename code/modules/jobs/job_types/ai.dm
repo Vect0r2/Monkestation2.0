@@ -1,6 +1,6 @@
 /datum/job/ai
 	title = JOB_AI
-	description = "Assist the crew, follow your laws, coordinate your cyborgs."
+	description = "Assist the crew, follow your laws, coordinate your cyborgs, manage your decentralized network."
 	auto_deadmin_role_flags = DEADMIN_POSITION_SILICON
 	faction = FACTION_STATION
 	total_positions = 1
@@ -40,6 +40,32 @@
 
 
 /datum/job/ai/get_latejoin_spawn_point()
+	// YOGSTATION: First try to find an AI data core with network connection
+	for(var/obj/machinery/ai/data_core/core in GLOB.data_cores)
+		if(core.machine_stat & (BROKEN|EMPED))
+			continue
+		if(!core.has_power())
+			continue
+		// Check if core is empty or has only dead AIs
+		var/has_living_ai = FALSE
+		for(var/mob/living/silicon/ai/AI in core.contents)
+			if(AI.stat != DEAD)
+				has_living_ai = TRUE
+				break
+		if(!has_living_ai)
+			return get_turf(core)
+
+	// Fallback to latejoin inactive cores
+	for(var/obj/structure/ai_core/latejoin_inactive/inactive_core as anything in GLOB.latejoin_ai_cores)
+		if(!inactive_core.is_available())
+			continue
+		GLOB.latejoin_ai_cores -= inactive_core
+		inactive_core.available = FALSE
+		. = inactive_core.loc
+		qdel(inactive_core)
+		return
+
+	// Final fallback to AI landmarks
 	var/list/primary_spawn_points = list() // Ideal locations.
 	var/list/secondary_spawn_points = list() // Fallback locations.
 	for(var/obj/effect/landmark/start/ai/spawn_point in GLOB.landmarks_list)
@@ -59,18 +85,6 @@
 		CRASH("Failed to find any AI spawn points.")
 	chosen_spawn_point.used = TRUE
 	return chosen_spawn_point
-
-
-/datum/job/ai/get_latejoin_spawn_point()
-	for(var/obj/structure/ai_core/latejoin_inactive/inactive_core as anything in GLOB.latejoin_ai_cores)
-		if(!inactive_core.is_available())
-			continue
-		GLOB.latejoin_ai_cores -= inactive_core
-		inactive_core.available = FALSE
-		. = inactive_core.loc
-		qdel(inactive_core)
-		return
-	return ..()
 
 
 /datum/job/ai/special_check_latejoin(client/C)

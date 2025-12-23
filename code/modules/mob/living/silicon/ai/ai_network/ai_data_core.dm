@@ -50,16 +50,17 @@
 	return
 
 /obj/machinery/ai/data_core/RefreshParts()
+	. = ..()
 	var/new_heat_mod = 1
 	var/new_power_mod = 1
 	for(var/obj/item/stock_parts/power_store/cell/C in component_parts)
 		integrated_battery = C
 
-	for(var/obj/item/stock_parts/matter_bin/M in component_parts)
-		new_heat_mod -= (M.rating - 1) / 30 //Max -20% at tier 4 parts, min -0% at tier 1
+	for(var/datum/stock_part/matter_bin/M in component_parts)
+		new_heat_mod -= (M.tier - 1) / 30 //Max -20% at tier 4 parts, min -0% at tier 1
 
-	for(var/obj/item/stock_parts/capacitor/C in component_parts)
-		new_power_mod -= (C.rating - 1) / 40 //Max -15% at tier 4 parts, min -0% at tier 1
+	for(var/datum/stock_part/capacitor/C in component_parts)
+		new_power_mod -= (C.tier - 1) / 40 //Max -15% at tier 4 parts, min -0% at tier 1
 	//63% total heat reduction in total at tier 4
 
 	heat_modifier = new_heat_mod
@@ -223,18 +224,21 @@
 	return TRUE
 
 /obj/machinery/ai/data_core/proc/transfer_AI(mob/living/silicon/ai/AI)
-	// PLACEHOLDER: Full AI transfer will be implemented in Phase 6
 	AI.forceMove(src)
-	//if(AI.eyeobj)
-	//	AI.eyeobj.forceMove(get_turf(src))
+	if(AI.eyeobj)
+		AI.eyeobj.forceMove(get_turf(src))
 
-	//if(network != AI.ai_network)
-	//	if(AI.ai_network)
-	//		AI.ai_network.remove_ai(AI)
-	//	var/old_net = AI.ai_network
-	//	AI.ai_network = network
-	//	network.ai_list += AI
-	//	AI.switch_ainet(old_net, network)
+	if(network != AI.ai_network)
+		if(AI.ai_network)
+			AI.ai_network.ai_list -= AI
+		var/datum/ai_network/old_net = AI.ai_network
+		AI.ai_network = network
+		if(network)
+			network.ai_list |= AI
+		AI.switch_ainet(old_net, network)
+
+	to_chat(AI, span_notice("Consciousness transfer complete. You are now housed in [src] at [get_area(src)]."))
+	update_appearance(UPDATE_ICON)
 
 /obj/machinery/ai/data_core/update_icon_state()
 	. = ..()
@@ -248,21 +252,22 @@
 
 /obj/machinery/ai/data_core/connect_to_ai_network() //If we ever get connected to a network (or a new one gets created) we get the AIs to the correct one too
 	. = ..()
-	// PLACEHOLDER: AI network integration will be implemented in Phase 6
-	//for(var/mob/living/silicon/ai/AI in contents)
-	//	if(!AI.ai_network)
-	//		network.ai_list |= AI
-	//		var/old_net = AI.ai_network
-	//		AI.ai_network = network
-	//		AI.switch_ainet(old_net, network)
-	//
-	//	if(AI.ai_network != network)
-	//		if(AI.ai_network)
-	//			AI.ai_network.remove_ai(AI)
-	//		var/old_net = AI.ai_network
-	//		AI.ai_network = network
-	//		network.ai_list |= AI
-	//		AI.switch_ainet(old_net, network)
+	for(var/mob/living/silicon/ai/AI in contents)
+		if(!AI.ai_network)
+			if(network)
+				network.ai_list |= AI
+				var/datum/ai_network/old_net = AI.ai_network
+				AI.ai_network = network
+				AI.switch_ainet(old_net, network)
+
+		if(AI.ai_network != network)
+			if(AI.ai_network)
+				AI.ai_network.ai_list -= AI
+			var/datum/ai_network/old_net = AI.ai_network
+			AI.ai_network = network
+			if(network)
+				network.ai_list |= AI
+			AI.switch_ainet(old_net, network)
 
 // PLACEHOLDER: Party time procs commented out - visual effect not critical
 /*

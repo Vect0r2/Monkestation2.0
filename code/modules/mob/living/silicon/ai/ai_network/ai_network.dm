@@ -113,6 +113,25 @@
 	var/research_points = max(round(AI_RESEARCH_PER_CPU * ((1 - locally_used) * total_cpu() * resources_assigned)), 0)
 	SSresearch.science_tech.add_point_list(list(TECHWEB_POINT_TYPE_AI = research_points))
 
+/// Find the best available data core for AI relocation
+/datum/ai_network/proc/find_best_core(mob/living/silicon/ai/requesting_ai)
+	var/list/available_cores = list()
+
+	// Find all data cores in this network
+	for(var/obj/machinery/ai/data_core/core in nodes)
+		if(!core.can_transfer_ai())
+			continue
+		if(core.loc == requesting_ai.loc) // Don't return current core
+			continue
+		available_cores += core
+
+	if(!length(available_cores))
+		return null
+
+	// For now, just return a random available core
+	// Could be enhanced later to prioritize by area, power, etc.
+	return pick(available_cores)
+
 /datum/ai_network/proc/is_empty()
 	return !cables.len && !nodes.len
 
