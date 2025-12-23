@@ -3,8 +3,9 @@
 
 //! Techweb names for new point types. Can be used to define specific point values for specific types of research (science, security, engineering, etc.)
 #define TECHWEB_POINT_TYPE_GENERIC "General Research"
-
+#define TECHWEB_POINT_TYPE_DEFAULT "General Research" // Alias for GENERIC
 #define TECHWEB_POINT_TYPE_NANITES "Nanite Research"
+#define TECHWEB_POINT_TYPE_AI "AI Research" // Yogstation AI system research type
 
 //!  Amount of points required to unlock nodes of corresponding tiers
 #define TECHWEB_TIER_1_POINTS 40

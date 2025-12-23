@@ -26,6 +26,8 @@ SUBSYSTEM_DEF(machines)
 		)
 	///List of all powernets on the server.
 	var/list/datum/powernet/powernets = list()
+	///List of all AI networks on the server.
+	var/list/datum/ai_network/ainets = list()
 
 /datum/controller/subsystem/machines/Initialize()
 	makepowernets()

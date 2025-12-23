@@ -1,0 +1,398 @@
+////////////////////////////////////////////
+// AI NETWORK DATUM
+// each contiguous network of ethernet cables & AI machinery
+/////////////////////////////////////
+/datum/ai_network
+	var/custom_name
+	var/number					// unique id
+	var/list/cables = list()	// all cables & junctions
+	var/list/nodes = list()		// all connected machines
+
+	var/list/ai_list = list() 	//List of all AIs in this network
+	var/list/reviving_ais = list()
+	var/list/decryption_drives = list()
+
+	var/list/synth_list = list()
+
+	var/previous_ram = 0
+
+	var/datum/ai_shared_resources/resources
+	//Cash from crypto, can be withdrawn at network console
+	var/bitcoin_payout = 0
+
+	var/temp_limit = AI_TEMP_LIMIT
+
+	var/local_cpu_usage = list() //How we use CPU locally
+
+	var/label
+
+	///Allows AI to instantly open doors, access APCs and use air alarms
+	var/obj/machinery/ai/master_subcontroller/cached_subcontroller
+
+/datum/ai_network/New(mob/living/synth_starter)
+	SSmachines.ainets += src
+	label = num2hex(rand(1,65535), -1)
+	resources = new(starting_network = src)
+	if(synth_starter)
+		synth_list += synth_starter
+
+/datum/ai_network/Destroy()
+	//Go away references, you suck!
+	for(var/obj/structure/ethernet_cable/C in cables)
+		cables -= C
+		C.network = null
+	for(var/obj/machinery/ai/M in nodes)
+		nodes -= M
+		M.network = null
+
+	resources.networks -= src
+
+	if(!length(resources.networks))
+		qdel(resources)
+
+	resources = null
+
+	SSmachines.ainets -= src
+	return ..()
+
+/datum/ai_network/process()
+	if(!cables.len && !nodes.len && !ai_list.len && !synth_list.len)
+		qdel(src)
+		return
+
+	var/total_cpu = resources.total_cpu()
+	var/resources_assigned = resources.total_cpu_assigned()
+
+	//Cryptocurrency mining
+	var/bitcoin_generated = 0
+	if(local_cpu_usage[AI_CRYPTO])
+		var/cpu_used_for_crypto = min(((1 - resources_assigned) * total_cpu * local_cpu_usage[AI_CRYPTO]), MAX_AI_BITCOIN_MINED_PER_TICK)
+		bitcoin_generated = cpu_used_for_crypto * AI_BITCOIN_PRICE
+
+	bitcoin_payout += bitcoin_generated
+
+	//Regular research generation
+	if(local_cpu_usage[AI_RESEARCH])
+		var/cpu_used_for_research = min(((1 - resources_assigned) * total_cpu * local_cpu_usage[AI_RESEARCH]), MAX_AI_REGULAR_RESEARCH_PER_TICK)
+		var/points = max(cpu_used_for_research * AI_REGULAR_RESEARCH_POINT_MULTIPLIER, 0)
+		SSresearch.science_tech.add_point_type(TECHWEB_POINT_TYPE_DEFAULT, points)
+
+	//Revive AI
+	// PLACEHOLDER: AI revival system will be fully implemented in Phase 6
+	//if(local_cpu_usage[AI_REVIVAL] && length(reviving_ais))
+	//	var/cpu_used_for_revival = ((1 - resources_assigned) * total_cpu * local_cpu_usage[AI_REVIVAL])
+	//	for(var/obj/machinery/ai/data_core/core in reviving_ais)
+	//		if(!core.can_revive())
+	//			reviving_ais -= core
+	//			continue
+	//		core.blackbox_processing += cpu_used_for_revival
+	//		if(core.blackbox_processing >= AI_BLACKBOX_PROCESSING_REQUIREMENT)
+	//			core.revive_ai()
+	//			reviving_ais -= core
+
+	//Decrypt floppy disks
+	// PLACEHOLDER: Puzzle disk decryption system not yet ported
+	//if(local_cpu_usage[AI_PUZZLE] && length(decryption_drives))
+	//	var/cpu_used_for_decryption = ((1 - resources_assigned) * total_cpu * local_cpu_usage[AI_PUZZLE])
+	//	for(var/obj/machinery/ai/server_cabinet/SC in decryption_drives)
+	//		if(!SC.puzzle_disk)
+	//			decryption_drives -= SC
+	//			continue
+	//		SC.decryption_progress += cpu_used_for_decryption
+	//		var/puzzles_completed = 0 // Placeholder
+	//		if(SC.decryption_progress >= (AI_FLOPPY_DECRYPTION_COST * (AI_FLOPPY_EXPONENT ** puzzles_completed)))
+	//			SC.decryption_progress = 0
+	//			SC.puzzle_disk.name = "decrypted floppy drive"
+	//			SC.puzzle_disk = null
+	//			decryption_drives -= SC
+
+	var/locally_used = 0
+	for(var/A in local_cpu_usage)
+		locally_used += local_cpu_usage[A]
+
+	var/research_points = max(round(AI_RESEARCH_PER_CPU * ((1 - locally_used) * total_cpu() * resources_assigned)), 0)
+	SSresearch.science_tech.add_point_list(list(TECHWEB_POINT_TYPE_AI = research_points))
+
+/datum/ai_network/proc/is_empty()
+	return !cables.len && !nodes.len
+
+//remove a cable from the current network
+//if the network is then empty, delete it
+//Warning : this proc DON'T check if the cable exists
+/datum/ai_network/proc/remove_cable(obj/structure/ethernet_cable/C)
+	cables -= C
+	C.network = null
+	if(is_empty())//the network is now empty...
+		qdel(src)///... delete it
+
+//add a cable to the current network
+//Warning : this proc DON'T check if the cable exists
+/datum/ai_network/proc/add_cable(obj/structure/ethernet_cable/C)
+	if(C.network)// if C already has a network...
+		if(C.network == src)
+			return
+		else
+			C.network.remove_cable(C) //..remove it
+	C.network = src
+	cables +=C
+
+//remove a power machine from the current network
+//if the network is then empty, delete it
+//Warning : this proc DON'T check if the machine exists
+/datum/ai_network/proc/remove_machine(obj/machinery/ai/M)
+	nodes -=M
+	M.network = null
+	if(is_empty())//the network is now empty...
+		qdel(src)///... delete it
+
+//add a power machine to the current network
+//Warning : this proc DOESN'T check if the machine exists
+/datum/ai_network/proc/add_machine(obj/machinery/ai/M)
+	if(M.network)// if M already has a network...
+		if(M.network == src)
+			return
+		else
+			M.disconnect_from_ai_network()//..remove it
+	M.network = src
+	nodes[M] = M
+
+/datum/ai_network/proc/find_data_core()
+	for(var/obj/machinery/ai/data_core/core in get_all_nodes())
+		if(!QDELETED(core) && core.can_transfer_ai())
+			return core
+
+/datum/ai_network/proc/find_subcontroller()
+	for(var/obj/machinery/ai/master_subcontroller/controller in get_all_nodes())
+		if(!QDELETED(controller) && controller.on)
+			return controller
+
+/datum/ai_network/proc/get_all_nodes(checked_nets = list())
+	. = nodes.Copy()
+	for(var/datum/ai_network/net in resources.networks)
+		if(net == src)
+			continue
+		. += net.nodes
+
+/datum/ai_network/proc/get_local_nodes_oftype(type_to_check)
+	. = list()
+	for(var/A in nodes)
+		if(istype(A, type_to_check))
+			. += A
+
+/datum/ai_network/proc/get_all_ais(checked_nets = list())
+	. = ai_list.Copy()
+	for(var/datum/ai_network/net in resources.networks)
+		if(net == src)
+			continue
+		. += net.ai_list
+
+/datum/ai_network/proc/remove_ai(mob/living/silicon/ai/AI)
+	resources.cpu_assigned[AI] = 0
+	resources.ram_assigned[AI] = 0
+	ai_list -= AI
+
+/datum/ai_network/proc/update_resources()
+	resources?.update_resources()
+
+/datum/ai_network/proc/total_cpu()
+	. = 0
+	for(var/obj/machinery/ai/server_cabinet/C in nodes)
+		. += C.total_cpu
+
+/datum/ai_network/proc/total_ram()
+	. = 0
+	for(var/obj/machinery/ai/server_cabinet/C in nodes)
+		. += C.total_ram
+
+/datum/ai_network/proc/get_temp_limit()
+	return temp_limit
+
+/datum/ai_network/proc/total_cpu_assigned()
+	return resources.total_cpu_assigned()
+
+/datum/ai_network/proc/total_ram_assigned()
+	return resources.total_ram_assigned()
+
+/datum/ai_network/proc/rebuild_remote(externally_linked = FALSE, touched_networks = list(), datum/ai_network/originator)
+	if(!resources)
+		return
+
+	if(!originator)
+		originator = src
+
+	if(externally_linked)
+		if(src in touched_networks)
+			return
+		touched_networks += src
+
+	cached_subcontroller = find_subcontroller()
+
+	var/list/found_networks = list()
+	// PLACEHOLDER: Networking machine support will be enhanced in future phases
+	//for(var/obj/machinery/ai/networking/N in nodes)
+	//	if(N.partner && N.partner.network && N.partner.network.resources)
+	//		if(N.partner.network in found_networks)
+	//			continue
+	//		found_networks += N.partner.network
+
+	if(resources && length(resources.networks) > 1) //We only split if we are actually connected to an external resource network
+		resources.split_resources(src)
+
+	found_networks -= touched_networks
+
+	unique_list_in_place(found_networks)
+
+	for(var/datum/ai_network/AN in found_networks)
+		if(originator.resources != AN.resources)
+			if(length(originator.resources.networks) > length(AN.resources.networks))
+				originator.resources.add_resource(AN.resources)
+			else
+				AN.resources.add_resource(originator.resources)
+		AN.rebuild_remote(TRUE, found_networks + src, originator)
+
+/datum/ai_network/proc/network_machine_disconnected(datum/ai_network/new_network)
+	var/obj/machinery/ai/data_core/core = new_network.find_data_core()
+	if(!core) //No core in disconnected network? no need to ask them to switch
+		return
+
+	// PLACEHOLDER: AI network integration will be completed in Phase 6
+	//for(var/mob/living/silicon/ai/AI in get_all_ais())
+	//	if(AI.ai_network != src && AI.ai_network != new_network)
+	//		continue
+	//	addtimer(CALLBACK(src, PROC_REF(disconnection_switch), AI, new_network), 0)
+
+/datum/ai_network/proc/disconnection_switch(mob/living/silicon/ai/AI, datum/ai_network/new_network)
+	// PLACEHOLDER: AI transfer functionality will be completed in Phase 6
+	//var/obj/machinery/ai/data_core/core = new_network.find_data_core()
+	//if(!core)
+	//	return
+	//var/area/core_area = get_area(core)
+	//
+	//var/choice = tgui_input_list(AI, "Two networks you're connected to have been disconnected, where do you want to transfer your main consciousness?", "Network Disconnection", list("Current network", "New network in [core_area]"))
+	//if(choice == "Current network")
+	//	return
+	//
+	//if(!core || QDELETED(core) || !core.can_transfer_ai())
+	//	to_chat(AI, span_warning("Something went wrong while transferring you! You're still bound to your original network."))
+	//	return
+	//core.transfer_AI(AI)
+	return
+
+/datum/ai_network/proc/add_synth(mob/living/synth)
+	// PLACEHOLDER: Synth AI network integration will be completed in Phase 6
+	//if(synth.ai_network)
+	//	synth.ai_network.remove_synth(synth, TRUE)
+	//synth.ai_network = src
+	synth_list += synth
+
+/datum/ai_network/proc/remove_synth(mob/living/synth, new_net)
+	// PLACEHOLDER: Synth AI network integration will be completed in Phase 6
+	//if(!new_net)
+	//	synth.ai_network = new /datum/ai_network(synth)
+	synth_list -= synth
+	if(!synth_list.len && local_cpu_usage[SYNTH_RESEARCH])
+		local_cpu_usage[SYNTH_RESEARCH] = 0
+
+/proc/merge_ainets(datum/ai_network/net1, datum/ai_network/net2)
+	if(!net1 || !net2) //if one of the network doesn't exist, return
+		return
+
+	if(net1 == net2) //don't merge same networks
+		return
+
+	//We assume net1 is larger. If net2 is in fact larger we are just going to make them switch places to reduce on code.
+	if(net1.cables.len < net2.cables.len)	//net2 is larger than net1. Let's switch them around
+		var/temp = net1
+		net1 = net2
+		net2 = temp
+
+	//merge net2 into net1
+	for(var/obj/structure/ethernet_cable/Cable in net2.cables) //merge cables
+		net1.add_cable(Cable)
+
+	for(var/obj/machinery/ai/Node in net2.nodes) //merge power machines
+		if(!Node.connect_to_ai_network())
+			Node.disconnect_from_ai_network() //if somehow we can't connect the machine to the new network, disconnect it from the old nonetheless
+
+	net1.ai_list += net2.ai_list //AIs can only be in 1 network at a time
+	net1.synth_list += net2.synth_list
+	if(net2.custom_name && !net1.custom_name)
+		net1.custom_name = net2.custom_name
+	// PLACEHOLDER: Synth network integration will be completed in Phase 6
+	//for(var/mob/living/synth in net1.synth_list)
+	//	synth.ai_network = net1
+
+	net1.update_resources()
+
+	return net1
+
+//remove the old network and replace it with a new one throughout the network.
+/proc/propagate_ai_network(obj/O, datum/ai_network/AN)
+	var/list/worklist = list()
+	var/list/found_machines = list()
+	var/index = 1
+	var/obj/P = null
+
+	worklist+=O //start propagating from the passed object
+
+	while(index<=worklist.len) //until we've exhausted all power objects
+		P = worklist[index] //get the next power object found
+		index++
+
+		if( istype(P, /obj/structure/ethernet_cable))
+			var/obj/structure/ethernet_cable/C = P
+			if(C.network != AN) //add it to the network, if it isn't already there
+				AN.add_cable(C)
+			worklist |= C.get_connections() //get adjacents power objects, with or without a network
+		else if(P.anchored && istype(P, /obj/machinery/ai))
+			var/obj/machinery/ai/M = P
+			found_machines |= M //we wait until the network is fully propagates to connect the machines
+		else
+			continue
+
+	//now that the network is set, connect found machines to it
+	for(var/obj/machinery/ai/PM in found_machines)
+		if(!PM.connect_to_ai_network()) //couldn't find a node on its turf...
+			PM.disconnect_from_ai_network() //... so disconnect if already on a network
+
+/proc/ai_list(turf/T, source, d, unmarked = FALSE, cable_only = FALSE)
+	. = list()
+
+	for(var/AM in T)
+		if(AM == source)
+			continue			//we don't want to return source
+
+		if(!cable_only && istype(AM, /obj/machinery/ai))
+			var/obj/machinery/ai/P = AM
+			if(P.network == 0)
+				continue
+
+			if(!unmarked || !P.network)		//if unmarked we only return things with no network
+				if(d == 0)
+					. += P
+
+		else if(istype(AM, /obj/structure/ethernet_cable))
+			var/obj/structure/ethernet_cable/C = AM
+
+			if(!unmarked || !C.network)
+				if(C.d1 == d || C.d2 == d)
+					. += C
+	return .
+
+/proc/_debug_ai_networks()
+	var/list/resource_list = list()
+	for(var/datum/ai_network/AN in SSmachines.ainets)
+		var/list/interconnections = list()
+		// PLACEHOLDER: Networking machine debugging will be enhanced later
+		//var/i = 1
+		//for(var/obj/machinery/ai/networking/N in AN.nodes)
+		//	if(N.partner && N.partner.network)
+		//		interconnections += "#[i] Networking[ADMIN_JMP(N)] connected to [ADMIN_JMP(N.partner)]/[REF(N.partner.network)] | Same resources: [N.partner.network.resources == AN.resources ? "<font color='green'>YES</font>" : "<font color='red'>NO</font>"]"
+		//		i++
+		message_admins("Network: [REF(AN)] | Resources: [REF(AN.resources)]")
+		for(var/A in interconnections)
+			message_admins(A)
+		resource_list |= AN.resources
+	message_admins("----------------------------")
+	for(var/datum/ai_shared_resources/ASR in resource_list)
+		message_admins("Resource count [REF(ASR)], CPU: [ASR.total_cpu()] | RAM: [ASR.total_ram()]")
